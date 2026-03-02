@@ -1,0 +1,6 @@
+# Alle Textdateien immer mit LF committen
+* text=auto eol=lf
+
+# Windows-spezifische Dateien mit CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
