@@ -27,7 +27,6 @@
 #include <cstdlib>
 #include <cstring>
 
-
 // POSIX serial
 #include <fcntl.h>
 #include <termios.h>
@@ -36,7 +35,6 @@
 // rpi-rgb-led-matrix  (FrameCanvas is the correct off-screen buffer type)
 #include "graphics.h"
 #include "led-matrix.h"
-
 
 using namespace rgb_matrix;
 
@@ -267,7 +265,7 @@ int main(int argc, char **argv) {
   RGBMatrix::Options matrixOpts;
   matrixOpts.cols = MATRIX_WIDTH;
   matrixOpts.rows = MATRIX_HEIGHT;
-  matrixOpts.brightness = 50;
+  matrixOpts.brightness = 20;
   matrixOpts.disable_hardware_pulsing = true; // --led-no-hardware-pulse
 
   // gpio_slowdown lives in RuntimeOptions, not in RGBMatrix::Options
