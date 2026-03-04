@@ -2,14 +2,15 @@
 //  main.cpp  ·  JUFO-BIKE  ·  ESP32 BLE Proximity Sensor
 //
 //  Architecture:
-//    sensor.cpp  – TFMini-S LiDAR reading (FreeRTOS, Core 1)
-//    ble_server.cpp – NimBLE-Arduino v2.x GATT Server (Core 0)
-//    main.cpp    – FreeRTOS BLE-notify task + Arduino entrypoints
+//    sensor.cpp      – TFMini-S LiDAR reading (FreeRTOS, Core 1)
+//    ble_server.cpp  – NimBLE-Arduino v2.x GATT Server (Core 0)
+//    matrix_sender.cpp – LED matrix protocol → Raspberry Pi (Serial)
+//    main.cpp        – FreeRTOS BLE-notify task + Arduino entrypoints
 // ============================================================
 #include "ble_server.h"
+#include "matrix_sender.h"
 #include "sensor.h"
 #include <Arduino.h>
-
 
 // ── Prevent Arduino Core 3.x from releasing BT memory ────────
 // btInUse() is declared extern "C" in esp32-hal-bt.h
@@ -25,8 +26,11 @@ static void bleNotifyTask(void *) {
   const TickType_t period = pdMS_TO_TICKS(1000 / BLE_NOTIFY_HZ);
 
   while (true) {
+    const uint16_t leftCm = sensorGetLeft();
+    const uint16_t rearCm = sensorGetRear();
+
     if (bleIsConnected()) {
-      bleNotifyDistances(sensorGetLeft(), sensorGetRear());
+      bleNotifyDistances(leftCm, rearCm);
 
       // Optional: log received speed for debugging
       const uint16_t spd = bleGetSpeedCms();
@@ -36,6 +40,10 @@ static void bleNotifyTask(void *) {
         (void)spd; // suppress unused-variable warning for now
       }
     }
+
+    // Always update the LED matrix (independent of BLE connection state)
+    matrixSenderUpdate(leftCm, rearCm);
+
     vTaskDelay(period);
   }
 }
@@ -49,10 +57,13 @@ void setup() {
   // 1. Start BLE GATT server (advertises immediately)
   bleServerInit();
 
-  // 2. Start sensor reading task on Core 1
+  // 2. Initialise the LED matrix sender (sends W0 to the Pi)
+  matrixSenderInit();
+
+  // 3. Start sensor reading task on Core 1
   sensorTaskStart();
 
-  // 3. Start BLE notify task on Core 0
+  // 4. Start BLE / matrix notify task on Core 0
   xTaskCreatePinnedToCore(bleNotifyTask, "BLE_Notify", 8192, nullptr, 1,
                           nullptr, 0 /* Core 0 */);
 
