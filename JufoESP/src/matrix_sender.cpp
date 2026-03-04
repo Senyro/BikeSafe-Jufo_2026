@@ -63,3 +63,10 @@ void matrixSenderUpdate(uint16_t leftCm, uint16_t rearCm) {
     s_lastCode = code;
   }
 }
+
+void matrixSenderForce(uint8_t code) {
+  // Always send the code (not edge-triggered), then update s_lastCode so the
+  // next sensor-based call sees the correct previous state.
+  sendCode(code);
+  s_lastCode = code;
+}

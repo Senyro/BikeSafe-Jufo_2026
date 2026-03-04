@@ -6,6 +6,7 @@
 //    Service 19B10000-…
 //      DIST  char (READ | NOTIFY)  → push 4-byte distance payload
 //      SPEED char (WRITE | WR_NR)  → receive 2-byte speed from app
+//      WARN  char (WRITE | WR_NR)  → receive 1-byte W-code from app (debug sim)
 //
 //  Key NimBLE v2.x features used:
 //    • onConnect  → updateConnParams()  (faster connection interval)
@@ -27,6 +28,10 @@ static NimBLECharacteristic *s_pDistChar = nullptr;
 
 // Speed value written by the connected app (cm/s, atomic for ISR-safety)
 static std::atomic<uint16_t> s_speedCms{BLE_SPEED_INVALID};
+
+// Warn code written by the app in debug-simulation mode.
+// -1 = nothing pending, 0/1/2 = W-code to forward to the Pi.
+static std::atomic<int8_t> s_warnCode{-1};
 
 // ── Server callbacks ──────────────────────────────────────────
 class ServerCB : public NimBLEServerCallbacks {
@@ -94,10 +99,25 @@ class SpeedCharCB : public NimBLECharacteristicCallbacks {
   }
 };
 
+// ── WARN characteristic callbacks ────────────────────────────
+class WarnCharCB : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *pChar, NimBLEConnInfo &connInfo) override {
+    NimBLEAttValue val = pChar->getValue();
+    if (val.size() >= 1) {
+      const int8_t code = static_cast<int8_t>(val[0]);
+      if (code >= 0 && code <= 9) {
+        s_warnCode.store(code);
+        Serial.printf("[BLE] WARN received: W%d\n", code);
+      }
+    }
+  }
+};
+
 // Static callback instances (no dynamic allocation needed)
 static ServerCB s_serverCB;
 static DistCharCB s_distCB;
 static SpeedCharCB s_speedCB;
+static WarnCharCB s_warnCB;
 
 // ── Public API ────────────────────────────────────────────────
 void bleServerInit() {
@@ -128,7 +148,12 @@ void bleServerInit() {
       BLE_CHAR_SPEED, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   pSpeedChar->setCallbacks(&s_speedCB);
 
-  // 7. Start the service (must be called before advertising starts)
+  // 7. WARN characteristic: 1-byte W-code override from the app (debug sim)
+  NimBLECharacteristic *pWarnChar = pSvc->createCharacteristic(
+      BLE_CHAR_WARN, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  pWarnChar->setCallbacks(&s_warnCB);
+
+  // 8. Start the service (must be called before advertising starts)
   pSvc->start();
 
   // 8. Configure and start advertising
@@ -164,3 +189,8 @@ bool bleIsConnected() {
 }
 
 uint16_t bleGetSpeedCms() { return s_speedCms.load(); }
+
+int8_t bleConsumeWarnCode() {
+  // exchange() atomically replaces with -1 and returns the old value
+  return s_warnCode.exchange(-1);
+}

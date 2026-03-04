@@ -1,6 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/ble_repository.dart';
 import '../core/debug_provider.dart';
+import '../core/distance_evaluator.dart';
+
+// Helper: translate EvaluationResult → W-code for the LED matrix.
+// Priority matches the ESP32 logic: left (overtaking) wins over rear.
+int _evalToWCode(EvaluationResult eval) {
+  if (eval.leftState == SafetyState.alarm) return 1;
+  if (eval.rearState == SafetyState.alarm) return 2;
+  return 0;
+}
 
 class DebugScreen extends ConsumerWidget {
   const DebugScreen({super.key});
@@ -10,6 +20,15 @@ class DebugScreen extends ConsumerWidget {
     final debugState = ref.watch(debugProvider);
     final notifier = ref.read(debugProvider.notifier);
 
+    // When simulation is active, mirror the evaluated W-code to the Pi
+    // via the WARN BLE characteristic every time the evaluation changes.
+    ref.listen<EvaluationResult>(evaluationProvider, (prev, next) {
+      if (!next.isConnected) return;
+      final debugSt = ref.read(debugProvider);
+      if (!debugSt.isSimulationEnabled) return;
+      final code = _evalToWCode(next);
+      ref.read(bleRepositoryProvider.notifier).sendMatrixCode(code);
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('Simulation & Debug'),

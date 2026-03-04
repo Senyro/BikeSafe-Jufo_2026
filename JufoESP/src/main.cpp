@@ -41,8 +41,15 @@ static void bleNotifyTask(void *) {
       }
     }
 
-    // Always update the LED matrix (independent of BLE connection state)
-    matrixSenderUpdate(leftCm, rearCm);
+    // Check if the app sent an explicit W-code (debug simulation mode).
+    // If so, forward it directly to the Pi and skip sensor evaluation.
+    const int8_t appWarn = bleConsumeWarnCode();
+    if (appWarn >= 0) {
+      matrixSenderForce(static_cast<uint8_t>(appWarn));
+    } else {
+      // Normal operation: evaluate real sensor distances
+      matrixSenderUpdate(leftCm, rearCm);
+    }
 
     vTaskDelay(period);
   }

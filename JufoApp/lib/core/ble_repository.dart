@@ -49,6 +49,7 @@ class BleState {
 const String _kServiceUuid = '19b10000-e8f2-537e-4f6c-d104768a1214';
 const String _kDistUuid = '19b10001-e8f2-537e-4f6c-d104768a1214';
 const String _kSpeedUuid = '19b10002-e8f2-537e-4f6c-d104768a1214';
+const String _kWarnUuid = '19b10003-e8f2-537e-4f6c-d104768a1214';
 const String _kDeviceName = 'JUFO-BIKE';
 
 // ── Auto-reconnect delay ──────────────────────────────────────
@@ -65,6 +66,7 @@ class BleRepository extends Notifier<BleState> {
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _speedChar;
+  BluetoothCharacteristic? _warnChar; // debug sim: send W-code to ESP32
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
@@ -130,6 +132,7 @@ class BleRepository extends Notifier<BleState> {
     await _device?.disconnect();
     _device = null;
     _speedChar = null;
+    _warnChar = null;
     state = const BleState();
     _log('Disconnected by user');
   }
@@ -146,6 +149,19 @@ class BleRepository extends Notifier<BleState> {
       await _speedChar!.write(bytes, withoutResponse: true);
     } catch (e) {
       _log('sendSpeed error: $e');
+    }
+  }
+
+  /// Write a W-code (0/1/2) to the WARN characteristic.
+  /// Used by the debug simulation screen to force-display a warning on the Pi.
+  /// Silently no-ops when not connected or WARN char not found.
+  Future<void> sendMatrixCode(int code) async {
+    if (_warnChar == null || !state.isConnected) return;
+    try {
+      await _warnChar!.write([code & 0xFF], withoutResponse: true);
+      _log('sendMatrixCode: W$code sent');
+    } catch (e) {
+      _log('sendMatrixCode error: $e');
     }
   }
 
@@ -247,6 +263,11 @@ class BleRepository extends Notifier<BleState> {
           if (uuid == _kSpeedUuid) {
             _speedChar = chr;
             _log('SPEED characteristic found');
+          }
+
+          if (uuid == _kWarnUuid) {
+            _warnChar = chr;
+            _log('WARN characteristic found');
           }
         }
         break; // found our service, no need to continue

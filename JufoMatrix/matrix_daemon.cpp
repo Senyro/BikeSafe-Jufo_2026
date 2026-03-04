@@ -49,7 +49,7 @@ static constexpr const char *FONT_PATH =
 
 // ── Colors ────────────────────────────────────────────────────
 static const Color COLOR_BG(0, 0, 0);            // Black background
-static const Color COLOR_TEXT(255, 180, 0);      // Amber text
+static const Color COLOR_TEXT(255, 0, 0);        // Red text
 static const Color COLOR_ICON(255, 0, 0);        // Red icon border
 static const Color COLOR_ICON_FG(255, 255, 255); // White icon glyph
 
@@ -191,8 +191,8 @@ static void renderClear(FrameCanvas *c) { c->Fill(0, 0, 0); }
 static void renderOvertaking(FrameCanvas *c) {
   c->Fill(0, 0, 0);
   int y = 6;
-  y += drawCenteredLine(c, "Überholabs-", y);
-  y += drawCenteredLine(c, "tand", y);
+  y += drawCenteredLine(c, "Überholab-", y);
+  y += drawCenteredLine(c, "stand", y);
   y += drawCenteredLine(c, "beachten", y);
   y += 3;
 

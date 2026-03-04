@@ -19,10 +19,11 @@
 // Units: centimetres.
 
 /** Left (overtaking) sensor: trigger if object closer than this. */
-#define MATRIX_THRESH_LEFT_CM   150u   // 1.50 m  (legal min overtaking distance)
+#define MATRIX_THRESH_LEFT_CM 150u // 1.50 m  (legal min overtaking distance)
 
 /** Rear (tailgating) sensor: trigger if object closer than this. */
-#define MATRIX_THRESH_REAR_CM   300u   // 3.00 m  (safe following distance at 30 km/h)
+#define MATRIX_THRESH_REAR_CM                                                  \
+  300u // 3.00 m  (safe following distance at 30 km/h)
 
 // ── Public API ───────────────────────────────────────────────
 
@@ -44,3 +45,12 @@ void matrixSenderInit();
  * @param rearCm   Latest rear distance in cm       (DIST_FAULT → 0xFFFF).
  */
 void matrixSenderUpdate(uint16_t leftCm, uint16_t rearCm);
+
+/**
+ * Force-send an explicit W-code to the Pi, bypassing sensor evaluation.
+ * Used when the app overrides the display in debug simulation mode.
+ * Always transmits (not edge-triggered) so the Pi reflects the app state.
+ *
+ * @param code  0 = clear, 1 = overtaking, 2 = tailgating.
+ */
+void matrixSenderForce(uint8_t code);
