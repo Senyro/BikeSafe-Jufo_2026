@@ -57,66 +57,73 @@ final evaluationProvider = Provider<EvaluationResult>((ref) {
     contextKnown = locState.contextKnown;
   }
 
-  // ── Disconnected shortcut ──────────────────────────────────
-  if (!isConnected) {
-    return EvaluationResult(
-      isConnected: false,
-      currentSpeedKmh: 0.0,
-      leftDistanceCm: 0xFFFF,
-      rearDistanceCm: 0xFFFF,
-      leftState: SafetyState.fault,
-      rearState: SafetyState.fault,
-      locationContext: 'Unbekannt',
-      contextKnown: false,
-    );
-  }
-
   // ── Context label ──────────────────────────────────────────
-  final String context = isUrban ? 'Innerorts' : 'Außerorts';
+  final String context = contextKnown
+      ? (isUrban ? 'Innerorts' : 'Außerorts')
+      : 'Bestimme...';
 
-  // ── Left sensor – overtaking (StVO §5 Abs. 4) ─────────────
-  // Innerorts: 1.5 m Mindestabstand → Alarm < 150 cm
-  // Außerorts: 2.0 m Mindestabstand → Alarm < 200 cm
+  // ── Sensor safety handling ──────────────────────────────────
   SafetyState leftState;
-  if (leftDist == 0xFFFF) {
-    leftState = SafetyState.fault;
-  } else {
-    final int alarm = isUrban ? 150 : 200; // cm
-    final int warning = alarm + 50; // +0.5 m Puffer
-    if (leftDist < alarm) {
-      leftState = SafetyState.alarm;
-    } else if (leftDist < warning) {
-      leftState = SafetyState.warning;
-    } else {
-      leftState = SafetyState.safe;
-    }
-  }
-
-  // ── Rear sensor – following distance (2-second rule) ──────
-  // Dynamic threshold: speed × 2 s, minimum 2 m
   SafetyState rearState;
-  if (rearDist == 0xFFFF) {
-    rearState = SafetyState.fault;
-  } else {
-    final double speedMs = speedKmh / 3.6;
-    final double requiredM = (speedMs * 2.0).clamp(2.0, double.infinity);
-    final int alarm = (requiredM * 100).toInt();
-    final int warning = alarm + 200; // +2 m Puffer
+  int leftDistResult;
+  int rearDistResult;
 
-    if (rearDist < alarm) {
-      rearState = SafetyState.alarm;
-    } else if (rearDist < warning) {
-      rearState = SafetyState.warning;
+  if (!isConnected) {
+    // If bike is disconnected, show sensor failure/unknown
+    leftState = SafetyState.fault;
+    rearState = SafetyState.fault;
+    leftDistResult = 0xFFFF;
+    rearDistResult = 0xFFFF;
+  } else if (speedKmh <= 2.0) {
+    // If stationary or moving very slowly (<= 2 km/h), suppress all warnings
+    leftState = SafetyState.safe;
+    rearState = SafetyState.safe;
+    leftDistResult = leftDist;
+    rearDistResult = rearDist;
+  } else {
+    // ── Connected Logic ──────────────────────────────────────
+
+    // Left sensor – overtaking (StVO §5 Abs. 4)
+    if (leftDist == 0xFFFF) {
+      leftState = SafetyState.fault;
     } else {
-      rearState = SafetyState.safe;
+      final int alarm = isUrban ? 150 : 200; // cm
+      final int warning = alarm + 50; // +0.5 m Puffer
+      if (leftDist < alarm) {
+        leftState = SafetyState.alarm;
+      } else if (leftDist < warning) {
+        leftState = SafetyState.warning;
+      } else {
+        leftState = SafetyState.safe;
+      }
     }
+    leftDistResult = leftDist;
+
+    // Rear sensor – following distance (2-second rule)
+    if (rearDist == 0xFFFF) {
+      rearState = SafetyState.fault;
+    } else {
+      final double speedMs = speedKmh / 3.6;
+      final double requiredM = (speedMs * 2.0).clamp(2.0, double.infinity);
+      final int alarm = (requiredM * 100).toInt();
+      final int warning = alarm + 200; // +2 m Puffer
+
+      if (rearDist < alarm) {
+        rearState = SafetyState.alarm;
+      } else if (rearDist < warning) {
+        rearState = SafetyState.warning;
+      } else {
+        rearState = SafetyState.safe;
+      }
+    }
+    rearDistResult = rearDist;
   }
 
   return EvaluationResult(
-    isConnected: true,
+    isConnected: isConnected,
     currentSpeedKmh: speedKmh,
-    leftDistanceCm: leftDist,
-    rearDistanceCm: rearDist,
+    leftDistanceCm: leftDistResult,
+    rearDistanceCm: rearDistResult,
     leftState: leftState,
     rearState: rearState,
     locationContext: context,

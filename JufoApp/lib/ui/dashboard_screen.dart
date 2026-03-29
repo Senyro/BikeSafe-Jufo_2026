@@ -49,13 +49,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         duration: const Duration(milliseconds: 300),
         margin: const EdgeInsets.all(8.0),
         decoration: BoxDecoration(
-          color: zoneColor.withOpacity(isAlarm ? 0.3 : 0.05),
+          color: zoneColor.withValues(alpha: isAlarm ? 0.3 : 0.05),
           border: Border.all(color: zoneColor, width: isAlarm ? 4.0 : 2.0),
           borderRadius: BorderRadius.circular(24.0),
           boxShadow: isAlarm
               ? [
                   BoxShadow(
-                    color: zoneColor.withOpacity(0.5),
+                    color: zoneColor.withValues(alpha: 0.5),
                     blurRadius: 20,
                     spreadRadius: 5,
                   ),

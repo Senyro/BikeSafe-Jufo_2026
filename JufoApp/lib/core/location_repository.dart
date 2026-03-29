@@ -126,7 +126,7 @@ class LocationRepository extends Notifier<LocationState> {
     ref.onDispose(() {
       _posSub?.cancel();
     });
-    _startListening();
+    // Stream is now started explicitly after permission check in requestPermissions()
     return const LocationState();
   }
 
@@ -180,19 +180,24 @@ class LocationRepository extends Notifier<LocationState> {
     }
   }
 
-  // ── Public API ────────────────────────────────────────────
-
   /// Requests all needed runtime permissions.
-  /// Also performs an immediate Nominatim lookup at the current position
-  /// so that the urban/rural context is known before the user starts riding.
-  Future<void> requestPermissions() async {
-    await Permission.location.request();
+  /// Also starts the location stream and performs an immediate Nominatim lookup
+  /// at the current position so that the urban/rural context is known.
+  Future<bool> requestPermissions() async {
+    final locStatus = await Permission.location.request();
     await Permission.bluetoothScan.request();
     await Permission.bluetoothConnect.request();
 
-    // Immediately determine urban/rural context for the current position.
-    // This avoids the user having to move 200 m before contextKnown = true.
-    _geocodeCurrentPosition();
+    if (locStatus.isGranted || locStatus.isLimited) {
+      // Start the stream now that we have permission
+      _startListening();
+      // Immediately determine urban/rural context for the current position.
+      _geocodeCurrentPosition();
+      return true;
+    }
+    
+    developer.log('Location permission not granted: $locStatus', name: 'LocationRepository');
+    return false;
   }
 
   /// Fetches the device's last/current GPS fix and geocodes it via Nominatim.
@@ -203,8 +208,9 @@ class LocationRepository extends Notifier<LocationState> {
 
       final permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever)
+          permission == LocationPermission.deniedForever) {
         return;
+      }
 
       // Try the last known position first (instant, no GPS fix needed).
       // Fall back to getCurrentPosition if nothing is cached.
