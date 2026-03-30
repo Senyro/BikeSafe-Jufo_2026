@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -151,13 +152,31 @@ class LocationRepository extends Notifier<LocationState> {
   }
 
   void _startListening() {
+    // Use platform-specific settings so we can set a fast update interval
+    // on Android (500 ms) without touching Nominatim's own rate limit.
+    final LocationSettings settings;
+    if (Platform.isAndroid) {
+      settings = AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        intervalDuration: const Duration(milliseconds: 500),
+      );
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      settings = AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    } else {
+      settings = const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+      );
+    }
+
     _posSub =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 0,
-          ),
-        ).listen(
+        Geolocator.getPositionStream(locationSettings: settings).listen(
           _onPosition,
           onError: (e) => developer.log(
             'Position stream error: $e',
