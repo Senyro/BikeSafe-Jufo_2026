@@ -3,6 +3,7 @@
     <!-- Permissions for Location (GPS Speed) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Permissions for BLE (flutter_blue_plus) -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />

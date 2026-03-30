@@ -11,31 +11,47 @@ import 'package:permission_handler/permission_handler.dart';
 
 /// Snapshot of the current location context.
 class LocationState {
-  /// Current GPS speed in km/h.
-  final double speedKmh;
+  /// Current GPS speed in m/s.
+  final double currentSpeedMs;
+
+  /// Latitude of the last position.
+  final double latitude;
+
+  /// Longitude of the last position.
+  final double longitude;
 
   /// True = innerorts (Nominatim confirmed populated place).
-  /// False = außerorts or not yet determined → conservative (außerorts).
+  /// False = außerorts or not yet determined.
   final bool isUrban;
 
   /// Whether a Nominatim result has been received at least once.
   final bool contextKnown;
 
   const LocationState({
-    this.speedKmh = 0.0,
+    this.currentSpeedMs = 0.0,
+    this.latitude = 0.0,
+    this.longitude = 0.0,
     this.isUrban = false,
     this.contextKnown = false,
   });
 
+  /// Convenience: Current speed in km/h.
+  double get speedKmh => currentSpeedMs * 3.6;
+
   LocationState copyWith({
-    double? speedKmh,
+    double? currentSpeedMs,
+    double? latitude,
+    double? longitude,
     bool? isUrban,
     bool? contextKnown,
-  }) => LocationState(
-    speedKmh: speedKmh ?? this.speedKmh,
-    isUrban: isUrban ?? this.isUrban,
-    contextKnown: contextKnown ?? this.contextKnown,
-  );
+  }) =>
+      LocationState(
+        currentSpeedMs: currentSpeedMs ?? this.currentSpeedMs,
+        latitude: latitude ?? this.latitude,
+        longitude: longitude ?? this.longitude,
+        isUrban: isUrban ?? this.isUrban,
+        contextKnown: contextKnown ?? this.contextKnown,
+      );
 }
 
 // ── Nominatim helpers ─────────────────────────────────────────
@@ -47,9 +63,14 @@ class LocationState {
 /// Rate limit policy: 1 req/s.  We call it at most once per 200 m, so
 /// the limit is never an issue during cycling.
 Future<bool?> _nominatimIsUrban(double lat, double lon) async {
+  // Round to 5 decimal places (~1.1m precision) to avoid unique requests for tiny movements.
+  final roundedLat = double.parse(lat.toStringAsFixed(5));
+  final roundedLon = double.parse(lon.toStringAsFixed(5));
+
   final uri = Uri.parse(
     'https://nominatim.openstreetmap.org/reverse'
-    '?lat=$lat&lon=$lon&format=json&zoom=14&addressdetails=1',
+    '?lat=$roundedLat&lon=$roundedLon&format=json&zoom=14&addressdetails=1'
+    '&email=Tiki5@outlook.de', // Added email to reduce risk of blocking
   );
 
   try {
@@ -57,16 +78,16 @@ Future<bool?> _nominatimIsUrban(double lat, double lon) async {
         .get(
           uri,
           headers: {
-            // Nominatim policy: identify your app in User-Agent
-            'User-Agent': 'JufoApp/1.0 (https://github.com/jufo)',
+            // Nominatim policy: unique User-Agent identifying the app.
+            'User-Agent': 'Senyro-Jufo-Bike-Safety-App/1.1 (contact: Tiki5@outlook.de)',
             'Accept-Language': 'de',
           },
         )
-        .timeout(const Duration(seconds: 6));
+        .timeout(const Duration(seconds: 4));
 
     if (response.statusCode != 200) {
       developer.log(
-        'Nominatim HTTP ${response.statusCode}',
+        'Nominatim HTTP ${response.statusCode}: ${response.body}',
         name: 'LocationRepository',
       );
       return null;
@@ -80,12 +101,6 @@ Future<bool?> _nominatimIsUrban(double lat, double lon) async {
 
     // In Germany, OSM Nominatim returns one of these fields when inside
     // a recognised populated place (Ort / Ortschaft):
-    //   city        → Großstadt
-    //   town        → Kleinstadt
-    //   village     → Dorf
-    //   suburb      → Stadtteil (innerhalb, zählt als innerorts)
-    //   borough     → Bezirk
-    // Absence of all these → typically außerorts (Feld, Wald, Autobahn, …)
     final bool urban =
         address.containsKey('city') ||
         address.containsKey('town') ||
@@ -94,13 +109,13 @@ Future<bool?> _nominatimIsUrban(double lat, double lon) async {
         address.containsKey('borough');
 
     developer.log(
-      'Nominatim: urban=$urban  addr=${address.keys.toList()}',
+      'Nominatim: urban=$urban address_keys=${address.keys.toList()}',
       name: 'LocationRepository',
     );
     return urban;
   } catch (e) {
-    developer.log('Nominatim error: $e', name: 'LocationRepository');
-    return null; // network unavailable – keep last known value
+    developer.log('Nominatim request failed: $e', name: 'LocationRepository');
+    return null; // network unavailable or timeout
   }
 }
 
@@ -113,7 +128,12 @@ class LocationRepository extends Notifier<LocationState> {
   static const double _kMinGeoDist = 200.0;
 
   Position? _lastGeoPos; // position of last successful geocoding
+  DateTime? _lastRequestTime; // time of the last attempted request
   bool _geoInFlight = false;
+
+  // For manual speed calculation fallback
+  Position? _prevPos; // previous GPS position
+  DateTime? _prevPosTime; // time of previous GPS position
 
   // ── Subscriptions ──────────────────────────────────────────
 
@@ -147,9 +167,42 @@ class LocationRepository extends Notifier<LocationState> {
   }
 
   void _onPosition(Position pos) {
-    // 1. Always update speed immediately
-    final double kmh = pos.speed * 3.6;
-    state = state.copyWith(speedKmh: kmh < 0 ? 0 : kmh);
+    // 1. Determine speed: prefer GPS-reported speed, fall back to manual calculation.
+    double speedMs;
+    final now = DateTime.now();
+
+    if (pos.speed >= 0) {
+      // GPS chip provides speed directly (ideal case).
+      speedMs = pos.speed;
+    } else if (_prevPos != null && _prevPosTime != null) {
+      // Fallback: compute speed from consecutive position fixes.
+      final double distM = Geolocator.distanceBetween(
+        _prevPos!.latitude,
+        _prevPos!.longitude,
+        pos.latitude,
+        pos.longitude,
+      );
+      final double elapsedS =
+          now.difference(_prevPosTime!).inMilliseconds / 1000.0;
+      speedMs = elapsedS > 0.1 ? distM / elapsedS : 0.0;
+    } else {
+      speedMs = 0.0;
+    }
+
+    _prevPos = pos;
+    _prevPosTime = now;
+
+    developer.log(
+      'Speed: ${(speedMs * 3.6).toStringAsFixed(1)} km/h '
+      '(GPS raw: ${pos.speed.toStringAsFixed(2)} m/s)',
+      name: 'LocationRepository',
+    );
+
+    state = state.copyWith(
+      currentSpeedMs: speedMs,
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+    );
 
     // 2. Trigger Nominatim if we've moved far enough
     _maybeGeocode(pos);
@@ -158,9 +211,18 @@ class LocationRepository extends Notifier<LocationState> {
   Future<void> _maybeGeocode(Position pos, {bool force = false}) async {
     if (_geoInFlight) return;
 
-    // Only geocode if moved more than _kMinGeoDist since last request,
+    // 1. Nominatim rate-limit: Max 1 request per second (we allow 1.1s for safety).
+    // This applies even if 'force' is true, to protect the server.
+    if (_lastRequestTime != null) {
+      final elapsedMs =
+          DateTime.now().difference(_lastRequestTime!).inMilliseconds;
+      if (elapsedMs < 1100) return;
+    }
+
+    // 2. Only geocode if moved more than _kMinGeoDist since last request,
     // unless force=true (used on startup for the initial context lookup).
-    if (!force && _lastGeoPos != null) {
+    // If the context is still unknown, we ignore the distance check to retry faster (but still rate-limited).
+    if (!force && _lastGeoPos != null && state.contextKnown) {
       final double dist = Geolocator.distanceBetween(
         _lastGeoPos!.latitude,
         _lastGeoPos!.longitude,
@@ -171,12 +233,16 @@ class LocationRepository extends Notifier<LocationState> {
     }
 
     _geoInFlight = true;
-    final bool? urban = await _nominatimIsUrban(pos.latitude, pos.longitude);
-    _geoInFlight = false;
-
-    if (urban != null) {
-      _lastGeoPos = pos;
-      state = state.copyWith(isUrban: urban, contextKnown: true);
+    _lastRequestTime = DateTime.now();
+    try {
+      final bool? urban = await _nominatimIsUrban(pos.latitude, pos.longitude);
+      if (urban != null) {
+        _lastGeoPos = pos;
+        state = state.copyWith(isUrban: urban, contextKnown: true);
+      }
+    } finally {
+      // Ensure flag is always reset, even on network error or timeout.
+      _geoInFlight = false;
     }
   }
 
@@ -217,9 +283,9 @@ class LocationRepository extends Notifier<LocationState> {
       Position? pos = await Geolocator.getLastKnownPosition();
       pos ??= await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.reduced, // faster fix for initial context
+          accuracy: LocationAccuracy.low, // More reliable fix than 'reduced' for initial context
         ),
-      );
+      ).timeout(const Duration(seconds: 15)); // Prevent hanging on startup if indoors
 
       developer.log(
         'Initial geocode at ${pos.latitude}, ${pos.longitude}',
